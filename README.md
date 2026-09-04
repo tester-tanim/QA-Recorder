@@ -1,6 +1,6 @@
-# QA Test Case Recorder (v0.9.0)
+# QA Test Case Recorder (v0.10.0)
 
-Chrome MV3 extension: record test cases with XPath + accessible names, generate automation scripts, replay them in-tab with self-healing locators, and catch page bugs as they happen.
+Chrome MV3 extension: record test cases with XPath + accessible names, generate automation scripts, replay them in-tab with self-healing locators, explain failures with on-device AI, and catch page bugs as they happen.
 
 > Repo note: this repo tracks the **shipped extension** (no `src/` build step — `background.js`, `content-scripts/`, `playback-panel.js` are hand-maintained; `chunks/` + `assets/` are the prebuilt React sidepanel bundle).
 
@@ -11,6 +11,8 @@ QA-Recorder/
 ├── manifest.json                        # MV3 manifest (v0.9.0)
 ├── background.js                        # Service worker: sessions, issues, variables, playback, screenshots
 ├── sidepanel.html + playback-panel.js   # Sidepanel host + QA Plus companion panel (Run/Steps/Issues)
+├── ai-assistant.js                      # On-device AI: explain failure + draft bug report (NEW v0.10.0)
+├── vendor/wllama/                       # Bundled llama.cpp WASM runtime for GGUF inference (NEW v0.10.0)
 ├── chunks/ + assets/                    # Prebuilt React sidepanel bundle (record/export UI)
 ├── content-scripts/
 │   ├── probe.js                         # MAIN-world probe: console / errors / fetch / XHR / long-tasks
@@ -57,6 +59,16 @@ probe (MAIN) --postMessage--> recorder (isolated) --runtime.sendMessage--> backg
 ## Roadmap (next, not implemented)
 
 - Adopt-healed-locator button (write fallback back into the step), visual diff/a11y-missing-label checks, TestRail/Xray exports.
+
+## On-device AI (NEW v0.10.0, zero setup)
+
+No installs, no terminal, no settings, nothing leaves the machine. After a failed run, QA Plus → Run shows **✨ Explain failure**; Issues shows **✨ Draft bug report** (preview + Copy).
+
+How it picks a model, automatically:
+1. **Chrome built-in AI** (Gemini Nano) if the browser has it — instant, Chrome manages the model.
+2. Otherwise a small **GGUF** (`Qwen2.5-0.5B Q4`, ~400MB) running on the bundled llama.cpp WASM runtime — first click downloads it once with a progress bar, then it's cached in the browser (OPFS) forever.
+
+Answers are capped to a few short lines (small models stay accurate on short prompts). If neither backend is available the buttons say so instead of failing silently.
 
 ## QA Plus panel
 

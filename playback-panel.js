@@ -181,6 +181,7 @@
         s.note || ("passed " + (s.passed || 0) + " · failed " + (s.failed || 0) + " · skipped " + (s.skipped || 0)));
       w.appendChild(sum);
     }
+    if (window.QAPlusAI) window.QAPlusAI.renderRunExtras(w, { session: state.session, results: state.results, summary: state.lastSummary });
 
     var steps = state.session ? state.session.steps : [];
     if (!steps.length) {
@@ -297,6 +298,7 @@
       w.appendChild(el("div", "qp-empty", "No issues detected during this recording."));
       return w;
     }
+    if (window.QAPlusAI) window.QAPlusAI.renderIssuesExtras(w, { session: state.session });
     issues.slice().reverse().forEach(function (is) {
       var box = el("div", "qp-issue");
       var head = el("div", "qp-row");
