@@ -88,9 +88,13 @@
 
   function startRun(onlyStepId) {
     if (state.tabId == null || state.running) return;
-    var strategy = document.getElementById("qp-strategy").value;
-    var delay = parseInt(document.getElementById("qp-delay").value, 10) || 400;
-    var stopOnFail = document.getElementById("qp-stoponfail").checked;
+    // Header Play button can fire while the Run tab (with these controls) isn't mounted.
+    var stratEl = document.getElementById("qp-strategy");
+    var delayEl = document.getElementById("qp-delay");
+    var stopEl = document.getElementById("qp-stoponfail");
+    var strategy = stratEl ? stratEl.value : "smart";
+    var delay = delayEl ? parseInt(delayEl.value, 10) || 400 : 400;
+    var stopOnFail = stopEl ? stopEl.checked : true;
     state.results = {};
     state.lastSummary = null;
     send({
@@ -120,6 +124,7 @@
     if (state.tab === "run") body.appendChild(renderRun());
     else if (state.tab === "steps") body.appendChild(renderSteps());
     else body.appendChild(renderIssues());
+    syncHeaderPlayButton();
   }
 
   function renderTabs() {
@@ -319,6 +324,60 @@
     return w;
   }
 
+  /* --------- header Play button (beside Record, shown when not recording) --------- */
+
+  function findRecordButton() {
+    var rootEl = document.getElementById("root");
+    if (!rootEl || !rootEl.querySelectorAll) return null;
+    var btns = rootEl.querySelectorAll("button");
+    for (var i = 0; i < btns.length; i++) {
+      var t = btns[i].textContent || "";
+      if (t.indexOf("Start recording") >= 0 || t.indexOf("Stop recording") >= 0) return btns[i];
+    }
+    return null;
+  }
+
+  function syncHeaderPlayButton() {
+    if (typeof document.querySelector !== "function") return;
+    var rec = findRecordButton();
+    var ours = document.querySelector("[data-qa-plus-play]");
+    var recording = !!(state.session && state.session.recording);
+    if (!rec || !rec.parentNode || recording) {
+      if (ours) ours.remove();
+      return;
+    }
+    if (!ours) {
+      ours = document.createElement("button");
+      ours.setAttribute("data-qa-plus-play", "1");
+      rec.parentNode.insertBefore(ours, rec.nextSibling);
+    }
+    ours.textContent = state.running ? "⏹ Stop" : "▶ Play";
+    ours.title = state.running ? "Stop playback" : "Play recorded steps";
+    try {
+      ours.className = rec.className;
+    } catch (e) {}
+    var hasSteps = !!(state.session && state.session.steps && state.session.steps.length);
+    ours.disabled = state.tabId == null || (!state.running && !hasSteps);
+    ours.onclick = function () {
+      if (state.running) stopRun();
+      else startRun(undefined);
+    };
+  }
+
+  var headerObsTimer = null;
+  function watchHeader() {
+    var rootEl = document.getElementById("root");
+    if (!rootEl || typeof MutationObserver === "undefined") return;
+    var obs = new MutationObserver(function () {
+      if (headerObsTimer) return;
+      headerObsTimer = setTimeout(function () {
+        headerObsTimer = null;
+        syncHeaderPlayButton();
+      }, 120);
+    });
+    obs.observe(rootEl, { childList: true, subtree: true });
+  }
+
   /* ---------------- boot ---------------- */
 
   function boot() {
@@ -333,6 +392,7 @@
     wrap.appendChild(body);
     root.appendChild(wrap);
     document.body.appendChild(root);
+    watchHeader();
 
     activeTabId().then(function (id) {
       state.tabId = id;
