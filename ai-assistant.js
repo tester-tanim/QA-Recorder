@@ -17,10 +17,35 @@
 (function () {
   "use strict";
 
-  var MODEL = {
-    repo: "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
-    file: "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+  var MODELS = {
+    smallest: {
+      label: "Smallest (~200MB)",
+      repo: "bartowski/SmolLM2-360M-Instruct-GGUF",
+      file: "SmolLM2-360M-Instruct-Q4_K_M.gguf",
+    },
+    balanced: {
+      label: "Balanced (~400MB)",
+      repo: "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+      file: "qwen2.5-0.5b-instruct-q4_k_m.gguf",
+    },
   };
+  var MODEL_KEY = "qa-ai-model"; // 'smallest' | 'balanced', persisted
+
+  function getModelKey() {
+    return chrome.storage.local
+      .get(MODEL_KEY)
+      .then(function (got) {
+        var k = got && got[MODEL_KEY];
+        return k === "balanced" ? "balanced" : "smallest";
+      })
+      .catch(function () { return "smallest"; });
+  }
+
+  function setModelKey(k) {
+    var o = {};
+    o[MODEL_KEY] = k;
+    return chrome.storage.local.set(o).catch(function () {});
+  }
   var MAX_PROMPT = 1400;
 
   var st = {
@@ -30,6 +55,7 @@
     lmSession: null,
     wllama: null,
     wllamaReady: false,
+    loadedKey: null, // which MODELS entry is currently loaded
     ensurePromise: null,
   };
 
@@ -89,24 +115,43 @@
 
   function tryWllama(progress) {
     var base = chrome.runtime.getURL("vendor/wllama/");
-    return import(base + "wllama.js")
-      .then(function (mod) {
-        var Wllama = mod.Wllama;
-        if (!Wllama) throw new Error("bad vendor bundle");
-        st.wllama = new Wllama({ default: base + "wasm/wllama.wasm" });
-        return st.wllama.loadModelFromHF(MODEL, {
-          n_threads: 1,
-          progressCallback: function (p) {
-            var t = p && p.total ? Math.round((p.loaded / p.total) * 100) : 0;
-            progress(t > 0 ? "Downloading AI model once — " + t + "% (cached afterwards)" : "Loading AI model…");
-          },
+    return getModelKey().then(function (key) {
+      var model = MODELS[key];
+      progress("Selected model: " + model.label);
+      var load = st.wllama
+        ? Promise.resolve()
+        : import(base + "wllama.js").then(function (mod) {
+            var Wllama = mod.Wllama;
+            if (!Wllama) throw new Error("bad vendor bundle");
+            st.wllama = new Wllama({ default: base + "wasm/wllama.wasm" });
+          });
+      return load
+        .then(function () {
+          if (st.wllamaReady && st.loadedKey === key) return; // already cached in memory
+          if (st.wllamaReady && st.loadedKey !== key && st.wllama.exit) {
+            return st.wllama.exit().catch(function () {}); // unload previous size
+          }
+        })
+        .then(function () {
+          return st.wllama.loadModelFromHF(model, {
+            n_threads: 1,
+            progressCallback: function (p) {
+              var t = p && p.total ? Math.round((p.loaded / p.total) * 100) : 0;
+              progress(
+                t > 0
+                  ? "Downloading AI model once — " + t + "% (" + model.label + ", cached afterwards)"
+                  : "Loading AI model (" + model.label + ")…"
+              );
+            },
+          });
+        })
+        .then(function () {
+          st.backend = "wllama";
+          st.wllamaReady = true;
+          st.loadedKey = key;
+          return true;
         });
-      })
-      .then(function () {
-        st.backend = "wllama";
-        st.wllamaReady = true;
-        return true;
-      });
+    });
   }
 
   function ensureAI(progress) {
@@ -213,6 +258,27 @@
 
   /* ---------------- UI widgets ---------------- */
 
+  function modelPicker() {
+    var row = document.createElement("div");
+    row.className = "qp-ai-row";
+    var lab = note("Model:");
+    var sel = document.createElement("select");
+    [["smallest", "Smallest download " + MODELS.smallest.label], ["balanced", "Better answers " + MODELS.balanced.label]].forEach(function (o) {
+      var opt = document.createElement("option");
+      opt.value = o[0];
+      opt.textContent = o[1];
+      sel.appendChild(opt);
+    });
+    getModelKey().then(function (k) { sel.value = k; });
+    sel.onchange = function () {
+      setModelKey(sel.value);
+      // takes effect on next AI run (previous size is unloaded then)
+    };
+    row.appendChild(lab);
+    row.appendChild(sel);
+    return row;
+  }
+
   function button(label) {
     var b = document.createElement("button");
     b.className = "qp-ai-btn";
@@ -292,6 +358,7 @@
     var box = document.createElement("div");
     box.className = "qp-ai";
     var btn = button("✨ Explain failure (" + fails.length + ")");
+    box.appendChild(modelPicker());
     var statusBox = document.createElement("div");
     var outBox = document.createElement("div");
     btn.onclick = function () {
@@ -312,6 +379,7 @@
     var box = document.createElement("div");
     box.className = "qp-ai";
     var btn = button("✨ Draft bug report");
+    box.appendChild(modelPicker());
     var statusBox = document.createElement("div");
     var outBox = document.createElement("div");
     btn.onclick = function () {
@@ -333,7 +401,10 @@
 
   window.QAPlusAI = {
     status: function () {
-      return { state: st.state, backend: st.backend, detail: st.detail };
+      return { state: st.state, backend: st.backend, detail: st.detail, model: st.loadedKey };
+    },
+    models: function () {
+      return { smallest: MODELS.smallest.label + " — " + MODELS.smallest.file, balanced: MODELS.balanced.label + " — " + MODELS.balanced.file };
     },
     renderRunExtras: renderRunExtras,
     renderIssuesExtras: renderIssuesExtras,

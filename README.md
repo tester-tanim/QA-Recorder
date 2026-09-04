@@ -66,7 +66,7 @@ No installs, no terminal, no settings, nothing leaves the machine. After a faile
 
 How it picks a model, automatically:
 1. **Chrome built-in AI** (Gemini Nano) if the browser has it — instant, Chrome manages the model.
-2. Otherwise a small **GGUF** (`Qwen2.5-0.5B Q4`, ~400MB) running on the bundled llama.cpp WASM runtime — first click downloads it once with a progress bar, then it's cached in the browser (OPFS) forever.
+2. Otherwise a small **GGUF** running on the bundled llama.cpp WASM runtime — first click downloads it once with a progress bar, then it's cached in the browser (OPFS) forever. A model picker in each AI box offers **Smallest (~200MB, SmolLM2-360M Q4)** or **Balanced (~400MB, Qwen2.5-0.5B Q4)**; the choice is remembered.
 
 Answers are capped to a few short lines (small models stay accurate on short prompts). If neither backend is available the buttons say so instead of failing silently.
 
