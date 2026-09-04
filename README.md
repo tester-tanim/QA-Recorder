@@ -1,20 +1,22 @@
-# QA Test Case Recorder (v0.8.0)
+# QA Test Case Recorder (v0.9.0)
 
-Chrome MV3 extension: record test cases with XPath + accessible names, generate automation scripts, and catch page bugs as they happen.
+Chrome MV3 extension: record test cases with XPath + accessible names, generate automation scripts, replay them in-tab with self-healing locators, and catch page bugs as they happen.
 
-> Status note (2026-09-04): this repo currently tracks the **built extension only**. No `src/`, `package.json`, or test runner is committed. The `entrypoints/ core/ selector-engine/ …` TypeScript layout described in older revisions of this file does not exist in the repo — see “Source vs. build” below. No new runtime features were added in this session; this README was corrected to match what is actually shipped.
+> Repo note: this repo tracks the **shipped extension** (no `src/` build step — `background.js`, `content-scripts/`, `playback-panel.js` are hand-maintained; `chunks/` + `assets/` are the prebuilt React sidepanel bundle).
 
 ## What’s in this repo (actual)
 
 ```
 QA-Recorder/
-├── manifest.json                  # MV3 manifest (v0.8.0)
-├── background.js                  # Service worker: sessions, issues, variables, context menus
-├── sidepanel.html + chunks/ + assets/  # Built sidepanel UI (sidepanel-C2FYPBbR.js, sidepanel-DGQ9olvv.css)
+├── manifest.json                        # MV3 manifest (v0.9.0)
+├── background.js                        # Service worker: sessions, issues, variables, playback, screenshots
+├── sidepanel.html + playback-panel.js   # Sidepanel host + QA Plus companion panel (Run/Steps/Issues)
+├── chunks/ + assets/                    # Prebuilt React sidepanel bundle (record/export UI)
 ├── content-scripts/
-│   ├── probe.js                   # MAIN-world probe: console / error / fetch / XHR
-│   └── recorder.js                # Isolated-world recorder: clicks, fills, selects, asserts, frames
-├── icon/ fonts/                   # Extension icons, Vazirmatn font
+│   ├── probe.js                         # MAIN-world probe: console / errors / fetch / XHR / long-tasks
+│   ├── recorder.js                      # Isolated-world recorder: clicks, fills, selects, asserts, frames
+│   └── playback.js                      # Isolated-world executor: self-healing playback (NEW v0.9.0)
+├── icon/ fonts/                         # Extension icons, Vazirmatn font
 └── README.md
 ```
 
@@ -28,9 +30,10 @@ Permissions (`manifest.json:1`): `storage, unlimitedStorage, tabs, scripting, co
 - **Selectors**: `data-testid/data-test-id/data-test/data-cy/data-qa(-id)/data-automation-id` first, stable `id` filter, unique CSS (`querySelectorAll==1`) + XPath (`evaluate==1`), absolute XPath + text XPath fallback, `aria-label/labelledby`, role/placeholder/alt, `elementKind`, `unique` flag, `testId` passthrough.
 - **Iframes**: `whoami/youare` frame-path chain (`qa-plugin-frame`), frame-aware codegen (`frameLocator`), `FIXME` comment when unresolved.
 - **Assertions** (6, via right-click context menu in `background.js:1`): `assertTextPresent, assertText, assertValue, assertVisible, assertHidden, assertUrl`.
-- **Bug detection** (`content-scripts/probe.js:1`): `console.error/warn`, `uncaught-error`, `unhandled-rejection`, `resource-error`, `http-error (>=400)`, `network-failure`; 40 events / 5 s throttle; dedup `kind::message`, capped 200 issues, linked `nearStepId`.
-- **Sessions** (`background.js:1`): per-tab `session:{tabId}` in `chrome.storage.local`, 500-step cap, `deleteStep/annotateStep/rename/clear`, auto-`navigate` step, `sessionChanged` broadcast.
-- **Variables**: named test-data variables (`variables` key), `setVariables` broadcast, `cypress.env.json` / `.env` download with secrets blanked.
+- **Bug detection** (`content-scripts/probe.js`): `console.error/warn`, `uncaught-error`, `unhandled-rejection`, `resource-error`, `http-error (>=400)` with **HTTP method**, `network-failure`, **`slow-task` long-task warnings (>=200ms)**; 40 events / 5 s throttle; dedup `kind::message`, capped 200 issues, linked `nearStepId`. **Error issues capture a tab screenshot** (JPEG, 3 s cooldown, newest 20 kept) shown in QA Plus → Issues.
+- **Sessions** (`background.js`): per-tab `session:{tabId}` in `chrome.storage.local`, 500-step cap, `deleteStep/annotateStep/updateStep/reorderSteps/toggleStep/duplicateStep/rename/clear`, auto-`navigate` step, `sessionChanged` broadcast. Disabled steps are skipped by playback.
+- **Variables**: named test-data variables (`variables` key), `setVariables` broadcast, `cypress.env.json` / `.env` download with secrets blanked. Playback substitutes `${VAR}` values (secrets must be bound to a variable).
+- **Playback + self-healing (NEW v0.9.0)**: `content-scripts/playback.js` executes steps in the page; locator fallback `testId → CSS → XPath → absolute XPath → text` (shadow-DOM aware); per-step `passed/failed/skipped` + `healed via <fallback>` badges, single-step run, strategy (`smart/xpath/css`), speed, stop-on-fail. Recording is auto-paused during playback so no echo steps are captured.
 - **Codegen** (sidepanel chunk): Playwright TS, Playwright Python, Cypress JS, Selenium Python; `smart/xpath/css` locator strategy; `TEST_PASSWORD` / `process.env` / `os.environ` / `Cypress.env` substitution.
 - **Export**: CSV (UTF-8 BOM), XLSX (Steps + Issues sheets), Zephyr Scale CSV/XLSX shape, Markdown, `qa-plugin-testcases v1` JSON, bug-report copy, Reset-site-state helper.
 
@@ -48,13 +51,13 @@ probe (MAIN) --postMessage--> recorder (isolated) --runtime.sendMessage--> backg
 - Typing is `keydown`-only: IME/paste/autofill/password-manager fills can be missed or partial; inner scroll containers and SPA `pushState` navigations are not recorded as steps.
 - Iframe assertion routing has no `frameId` filter (duplicates possible); unresolved frames emit `FIXME`.
 - Ambiguous locators show a badge but codegen still emits them (strict-mode risk); Cypress `.type()` doesn’t escape `{}`; CSV export has no `=,+,-,@` formula-injection guard; multiline notes are injected raw into code comments.
-- No in-panel playback runner yet; no step reorder/edit/disable/duplicate.
+- In-panel playback exists (QA Plus → Run) but cross-origin iframe steps report “not supported” — same-origin frames only.
+- Service workers can suspend on very long runs; progress resumes per step message, summary included.
 
-## Roadmap (proposed, not implemented)
+## Roadmap (next, not implemented)
 
-- **Playback + healing**: in-panel run/step/pause with fallback `testId → role+name → css → xpath → text` and `healedFrom` badge + apply-back.
-- **Bug evidence + UX**: error screenshots, failed-request HAR snippet, slow-resource/a11y checks, inline step edit/reorder/disable, extra asserts.
+- Adopt-healed-locator button (write fallback back into the step), visual diff/a11y-missing-label checks, TestRail/Xray exports.
 
-## Source vs. build
+## QA Plus panel
 
-To add features you need the original TypeScript source (wxt/vite + React). If lost, recover by prettifying `background.js`, `content-scripts/recorder.js`, `content-scripts/probe.js`, `chunks/sidepanel-C2FYPBbR.js` into `entrypoints/`, `core/`, `selector-engine/`, `codegen/`, `export/`, `library/` per the old layout, then add `package.json` + `vitest` harness. Until then `npm test` does not apply — there is no test runner in this repo.
+`playback-panel.js` (loaded by `sidepanel.html` next to the React bundle) adds a **QA Plus** section with three tabs — **Run** (run all / run single / stop, strategy, speed, results with healed badges), **Steps** (enable toggle, edit value/key/url/note, reorder, duplicate, delete), **Issues** (severity/kind/method/count + error screenshots). It uses only the documented background message protocol, so it keeps working if the React bundle is rebuilt.
